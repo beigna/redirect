@@ -1,41 +1,57 @@
 package main
 
 import (
-    //"fmt"
-    "log"
-    "net/http"
-    "github.com/go-redis/redis"
+	"fmt"
+	"github.com/go-redis/redis"
+	"github.com/gorilla/mux"
+	"log"
+	"net/http"
 )
 
-type redirect struct {
-    key string
-    url string
+var client = redis.NewClient(&redis.Options{
+	Addr:     "localhost:6379",
+	Password: "",
+	DB:       1,
+})
+
+func HomeHandler(w http.ResponseWriter, r *http.Request) {
+	size, err := client.DbSize().Result()
+	if err != nil {
+		log.Fatal("Redis.Get: ", err)
+	} else {
+		fmt.Fprintf(w, `<html>
+<head><title>URL Shorten service</title></head>
+<body>We are serving %d URLs. Amazing!</body>
+</html>
+`, size)
+	}
 }
 
-func handler(w http.ResponseWriter, r *http.Request) {
-    client := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "", // no password set
-		DB:       1,  // use default DB
-	})
+func RedirectHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	key := vars["key"]
+	url, err := client.Get(key).Result()
 
-    key := r.URL.Path[1:]
-    val, err := client.Get(key).Result()
-
-    if err == redis.Nil {
-        w.WriteHeader(http.StatusNotFound)
-        w.Write([]byte("404 - Not Found"))
-    } else if err != nil {
-        log.Fatal("Redis.Get: ", err)
-    } else {
-        http.Redirect(w, r, val, 302)
-    }
+	if err == redis.Nil {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("404 - Not Found"))
+	} else if err != nil {
+		log.Fatal("Redis.Get: ", err)
+	} else {
+		http.Redirect(w, r, url, 302)
+	}
 }
 
 func main() {
-    http.HandleFunc("/", handler)
-    err := http.ListenAndServe(":8080", nil)
-    if err != nil {
-        log.Fatal("ListenAndServe: ", err)
-    }
+	router := mux.NewRouter()
+	router.HandleFunc("/", HomeHandler)
+	//router.HandleFunc("/new", NewRedirectHandler)
+	router.HandleFunc("/{key}", RedirectHandler)
+
+	http.Handle("/", router)
+
+	err := http.ListenAndServe("127.0.0.1:8080", nil)
+	if err != nil {
+		log.Fatal("ListenAndServe: ", err)
+	}
 }
